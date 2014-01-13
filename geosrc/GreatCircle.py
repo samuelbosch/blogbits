@@ -37,6 +37,15 @@ def crosstrack(p,A,B, radius=6371000):
     dXt = asin(sin(dAp)*sin(brngAp-brngAB))
     return fabs(dXt) * radius
 
+def destination_point(p, distanceR, bearing):
+    x,y = math.radians(p.x),math.radians(p.y)
+    y2 = math.asin(math.sin(y)*math.cos(distanceR) + 
+                   math.cos(y)*math.sin(distanceR)*math.cos(bearing))
+    x2 = x + math.atan2(math.sin(bearing)*math.sin(distanceR)*math.cos(y), 
+                               math.cos(distanceR)-math.sin(y)*math.sin(y2));
+    x2 = (lon2+3*math.PI) % (2*math.PI) - math.PI;  ## normalise to -180..+180
+    return math.degrees(x2),math.degrees(y2)
+
 import unittest
 class Test_gc(unittest.TestCase):
     def test_distance_haversine(self):
@@ -52,6 +61,9 @@ class Test_gc(unittest.TestCase):
         self.assertAlmostEqual(b, 152.504694,places=6)
         
     def test_crosstrack(self):
+        self.fail("NOT IMPLEMENTED")
+
+    def test_destination_point(self):
         self.fail("NOT IMPLEMENTED")
 
 if __name__ == '__main__':
