@@ -1,4 +1,4 @@
-from math import cos, sin
+from math import cos, sin, acos, radians
 
 class Point(object):
     def __init__(self,x,y):
@@ -10,24 +10,24 @@ class AzimuthalEquidistantProjection(object):
         http://mathworld.wolfram.com/AzimuthalEquidistantProjection.html
         http://www.radicalcartography.net/?projectionref
     """
-    DEGTORAD = 0.01745329251
     def __init__(self, center):
         self.center = center
-        self.t1 = center.y * self.DEGTORAD ## latitude center of projection
-        self.l0 = center.x * self.DEGTORAD ## longitude center of projection
+        self.t1 = radians(center.y) ## latitude center of projection
+        self.l0 = radians(center.x) ## longitude center of projection
         self.cost1 = cos(self.t1)
-
+        self.sint1 = sin(self.t1)
+        
     def project(self, point):
-        t = self.DEGTORAD * point.y
-        l = self.DEGTORAD * point.x
+        t = radians(point.y)
+        l = radians(point.x)
         costcosll0 = cos(t) * cos(l-self.l0)
         sint = sin(t)
-        sint1 = sin(self.t1)
-        c = math.acos ((sint1) * (sint) + (self.cost1) * costcosll0)
+        
+        c = acos ((self.sint1) * (sint) + (self.cost1) * costcosll0)
         k = c / sin(c)
         x = k * cos(t) * sin(l-self.l0)
-        y = k * self.cost1 * sint - sint1 * costcosll0
-        return Point([x, y])
+        y = k * self.cost1 * sint - self.sint1 * costcosll0
+        return Point(x, y)
 
 import unittest
 class Test_AzimuthalEquidistantProjection(unittest.TestCase):
@@ -46,7 +46,6 @@ class Test_AzimuthalEquidistantProjection(unittest.TestCase):
         r = p.project(Point(7.935, 63.302))
         self.assertAlmostEqual(0.1405127567, r.x)
         self.assertAlmostEqual(-0.263406547, r.y)
-
 
 if __name__ == '__main__':
     unittest.main()
