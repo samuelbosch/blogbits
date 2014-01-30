@@ -30,6 +30,17 @@ def bearing(A, B):
 def bearing_degrees(A,B):
     return degrees(bearing(A,B))
 
+def midpoint(A,B):
+    lon1, lat1 = radians(A.x), radians(A.y)
+    lon2, lat2 = radians(B.x), radians(B.y)
+    dLon = lon2-lon1
+
+    Bx = cos(lat2) * cos(dLon)
+    By = cos(lat2) * sin(dLon)
+    lat3 = atan2(sin(lat1)+sin(lat2),sqrt((cos(lat1)+Bx)*(cos(lat1)+Bx) + By*By))
+    lon3 = lon1 + atan2(By, cos(lat1) + Bx)
+    return Point(degrees(lon3),degrees(lat3))
+
 def crosstrack(p,A,B, radius=6371000):
     dAp = distance_haversine(A, p, radius=1)
     brngAp = bearing(A,p)
@@ -43,8 +54,8 @@ def destination_point(p, distanceR, bearing):
                    math.cos(y)*math.sin(distanceR)*math.cos(bearing))
     x2 = x + math.atan2(math.sin(bearing)*math.sin(distanceR)*math.cos(y), 
                                math.cos(distanceR)-math.sin(y)*math.sin(y2));
-    x2 = (lon2+3*math.PI) % (2*math.PI) - math.PI;  ## normalise to -180..+180
-    return math.degrees(x2),math.degrees(y2)
+    x2 = (x2+3*math.pi) % (2*math.pi) - math.pi;  ## normalise to -180..+180
+    return Point(degrees(x2),degrees(y2))
 
 def get_centroid(points):
     """ 
@@ -65,7 +76,7 @@ def get_centroid(points):
     center_lon = math.atan2(avg_y,avg_x)
     hyp = math.sqrt(avg_x*avg_x + avg_y*avg_y) 
     center_lat = math.atan2(avg_z, hyp)
-    return Point([math.degrees(center_lon), math.degrees(center_lat)])
+    return Point(math.degrees(center_lon), math.degrees(center_lat))
 
 import unittest
 class Test_gc(unittest.TestCase):
@@ -80,6 +91,9 @@ class Test_gc(unittest.TestCase):
     def test_bearing_degrees(self):
         b = bearing_degrees(Point(-10.0001, 80.0001), Point(7.935, 63.302))
         self.assertAlmostEqual(b, 152.504694,places=6)
+
+    def test_midpoint(self):
+        self.fail("NOT IMPLEMENTED")
         
     def test_crosstrack(self):
         self.fail("NOT IMPLEMENTED")
