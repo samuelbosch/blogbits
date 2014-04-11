@@ -3,7 +3,7 @@ http://www.movable-type.co.uk/scripts/latlong.html
 http://williams.best.vwh.net/ftp/avsig/avform.txt
 """
 
-from math import radians, degrees, cos, sin, sqrt, atan2, asin, fabs
+from math import radians, degrees, cos, sin, sqrt, atan2, asin, fabs, pi
 
 class Point(object):
     def __init__(self,x,y):
@@ -11,6 +11,7 @@ class Point(object):
         self.y = y
 
 def distance_haversine(A, B, radius=6371000):
+    """ note that the default distance is in meters """
     dLat = radians(B.y-A.y)
     dLon = radians(B.x-A.x)
     lat1 = radians(A.y)
@@ -31,52 +32,74 @@ def bearing_degrees(A,B):
     return degrees(bearing(A,B))
 
 def midpoint(A,B):
+    ## little shortcut
+    if A.x == B.x: return Point(A.x, (A.y+B.y)/2)
+    if A.y == B.y: return Point((A.x+B.x)/2, A.y)
+    
     lon1, lat1 = radians(A.x), radians(A.y)
     lon2, lat2 = radians(B.x), radians(B.y)
     dLon = lon2-lon1
 
     Bx = cos(lat2) * cos(dLon)
     By = cos(lat2) * sin(dLon)
-    lat3 = atan2(sin(lat1)+sin(lat2),sqrt((cos(lat1)+Bx)*(cos(lat1)+Bx) + By*By))
+    lat3 = atan2(sin(lat1)+sin(lat2), sqrt((cos(lat1)+Bx)*(cos(lat1)+Bx) + By*By))
     lon3 = lon1 + atan2(By, cos(lat1) + Bx)
     return Point(degrees(lon3),degrees(lat3))
 
-def crosstrack(p,A,B, radius=6371000):
+def crosstrack_error(p,A,B, radius=6371000):
+    """ distance (in meters) from a point to the closest point along a track """
     dAp = distance_haversine(A, p, radius=1)
     brngAp = bearing(A,p)
     brngAB = bearing(A,B)
     dXt = asin(sin(dAp)*sin(brngAp-brngAB))
     return fabs(dXt) * radius
 
+def point_line_distance(p, A,B, tolerance=0.1, radius=6371000): # tolerance and radius in meters
+    ## recursive function that halves the search space until result is within tolerance
+    ## disadvantages:
+    # 1) the rounding errors in midpoint do add up
+    # 2) not very fast
+    def rec_point_line_distance(p,A,B,dA,dB):
+        C = midpoint(A,B)
+        dC = distance_haversine(p,C)
+        if fabs(dC-dA) < tolerance or fabs(dC-dB) < tolerance:
+            return dC
+        elif dA < dB:
+            return point_line_distance(p,A,C,dA, dC)
+        else:
+            return point_line_distance(p,C,B,dC, dB)
+    dA = distance_haversine(p,A)
+    dB = distance_haversine(p,B)
+    return rec_point_line_distance(p,A,B,dA,dB)
+
 def destination_point(p, distanceR, bearing):
-    x,y = math.radians(p.x),math.radians(p.y)
-    y2 = math.asin(math.sin(y)*math.cos(distanceR) + 
-                   math.cos(y)*math.sin(distanceR)*math.cos(bearing))
-    x2 = x + math.atan2(math.sin(bearing)*math.sin(distanceR)*math.cos(y), 
-                               math.cos(distanceR)-math.sin(y)*math.sin(y2));
-    x2 = (x2+3*math.pi) % (2*math.pi) - math.pi;  ## normalise to -180..+180
+    x,y = radians(p.x),radians(p.y)
+    y2 = asin(sin(y)*cos(distanceR) + cos(y)*sin(distanceR)*cos(bearing))
+    x2 = x + atan2(sin(bearing)*sin(distanceR)*cos(y), 
+                   cos(distanceR)-sin(y)*sin(y2))
+    x2 = (x2+3*pi) % (2*pi) - pi;  ## normalise to -180..+180
     return Point(degrees(x2),degrees(y2))
 
 def get_centroid(points):
     """ 
-        http://www.geomidpoint.com/example.html 
-        http://gis.stackexchange.com/questions/6025/find-the-centroid-of-a-cluster-of-points
+    http://www.geomidpoint.com/example.html 
+    http://gis.stackexchange.com/questions/6025/find-the-centroid-of-a-cluster-of-points
     """
     sum_x,sum_y,sum_z = 0,0,0
     for p in points:
-        lat = math.radians(p.y)
-        lon = math.radians(p.x)
+        lat = radians(p.y)
+        lon = radians(p.x)
         ## convert lat lon to cartesian coordinates
-        sum_x = sum_x + math.cos(lat) * math.cos(lon)
-        sum_y = sum_y + math.cos(lat) * math.sin(lon)
-        sum_z = sum_z + math.sin(lat)
+        sum_x = sum_x + cos(lat) * cos(lon)
+        sum_y = sum_y + cos(lat) * sin(lon)
+        sum_z = sum_z + sin(lat)
     avg_x = sum_x / float(len(points))
     avg_y = sum_y / float(len(points))
     avg_z = sum_z / float(len(points))
-    center_lon = math.atan2(avg_y,avg_x)
-    hyp = math.sqrt(avg_x*avg_x + avg_y*avg_y) 
-    center_lat = math.atan2(avg_z, hyp)
-    return Point(math.degrees(center_lon), math.degrees(center_lat))
+    center_lon = atan2(avg_y,avg_x)
+    hyp = sqrt(avg_x*avg_x + avg_y*avg_y) 
+    center_lat = atan2(avg_z, hyp)
+    return Point(degrees(center_lon), degrees(center_lat))
 
 import unittest
 class Test_gc(unittest.TestCase):
@@ -93,11 +116,35 @@ class Test_gc(unittest.TestCase):
         self.assertAlmostEqual(b, 152.504694,places=6)
 
     def test_midpoint(self):
-        self.fail("NOT IMPLEMENTED")
+        m = midpoint(Point(-20.0,5.0), Point(-10.0,5.0))
+        self.assertAlmostEqual(-15.0, m.x, places=6)
+        m = midpoint(Point(7.0,5.0), Point(7.0,15.0))
+        self.assertAlmostEqual(10.0, m.y, places=6)
         
-    def test_crosstrack(self):
-        self.fail("NOT IMPLEMENTED")
+    def test_crosstrack_error(self):
+        p,A,B = Point(0.0, 1.0), Point(1.0, 1.0), Point(2.0, 1.0)
+        d = crosstrack_error(p,A,B)
+        self.assertAlmostEqual(d, distance_haversine(p,A), places=0)
+        ## Apparently crosstrack_error returns incorrect results in some very specific cases (when p is completly off track)
+        
+    def test_point_line_distance(self):
+        
+        p,A,B = Point(0.0, 1.0), Point(1.0, 1.0), Point(2.0, 1.0)
+        d = point_line_distance(p,A,B)
+        self.assertAlmostEqual(d, distance_haversine(p,A), places=0)
 
+        p,A,B = Point(2.0, 1.2), Point(1.0, 1.0), Point(3.0, 1.0)
+        d = point_line_distance(p,A,B)
+        self.assertAlmostEqual(d, distance_haversine(p,Point(2.0,1.0)), places=0)
+
+        p,A,B = Point(0.0, 90.0), Point(-179.0, -21.0), Point(179.5, -22.0)
+        d = point_line_distance(p,A,B)
+        self.assertAlmostEqual(d, distance_haversine(p,A), places=0)
+
+        p,A,B = Point(0.0, 89.0), Point(-179.0, -22.0), Point(179.5, -22.0)
+        d = point_line_distance(p,A,B)
+        self.assertAlmostEqual(d, distance_haversine(p,Point(0, -22)), places=0)
+        
     def test_destination_point(self):
         self.fail("NOT IMPLEMENTED")
 
