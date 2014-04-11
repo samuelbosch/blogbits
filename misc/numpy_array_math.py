@@ -7,5 +7,7 @@ print(a > 2)
 print(b > 2)
 print(True-False)
 print(False-True)
-print(a-b)
-print(a*1-b)
+print((a>2)-(b>2))
+print((a>2)*1-(b>2))
+
+
