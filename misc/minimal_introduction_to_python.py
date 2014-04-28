@@ -139,9 +139,9 @@ list_files(startdir)
 for root, directories, files in os.walk(startdir, topdown=True):
     print 'dir : %s' % root
     if files:
-        print 'files :'
+        print('files :')
         for f in files:
-            print '\t', os.path.join(root, f)
+            print('\t', os.path.join(root, f))
 
 # 4) reading, parsing and writing files
 
