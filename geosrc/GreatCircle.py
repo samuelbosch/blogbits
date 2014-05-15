@@ -1,4 +1,4 @@
-"""
+""" some references
 http://www.movable-type.co.uk/scripts/latlong.html
 http://williams.best.vwh.net/ftp/avsig/avform.txt
 """
@@ -47,18 +47,19 @@ def midpoint(A,B):
     return Point(degrees(lon3),degrees(lat3))
 
 def crosstrack_error(p,A,B, radius=6371000):
-    """ distance (in meters) from a point to the closest point along a track """
+    """ distance (in meters) from a point to the closest point along a track
+        http://williams.best.vwh.net/avform.htm#XTE """
     dAp = distance_haversine(A, p, radius=1)
     brngAp = bearing(A,p)
     brngAB = bearing(A,B)
     dXt = asin(sin(dAp)*sin(brngAp-brngAB))
     return fabs(dXt) * radius
 
-def point_line_distance(p, A,B, tolerance=0.1, radius=6371000): # tolerance and radius in meters
-    ## recursive function that halves the search space until result is within tolerance
-    ## disadvantages:
-    # 1) the rounding errors in midpoint do add up
-    # 2) not very fast
+def point_line_distance(p, A,B, radius=6371000, tolerance=0.1): # tolerance and radius in meters
+    """ recursive function that halves the search space until result is within tolerance
+        disadvantages:
+        1) the rounding errors in midpoint do add up
+        2) not very fast """
     def rec_point_line_distance(p,A,B,dA,dB):
         C = midpoint(A,B)
         dC = distance_haversine(p,C)
@@ -145,9 +146,6 @@ class Test_gc(unittest.TestCase):
         d = point_line_distance(p,A,B)
         self.assertAlmostEqual(d, distance_haversine(p,Point(0, -22)), places=0)
         
-    def test_destination_point(self):
-        self.fail("NOT IMPLEMENTED")
-
     def test_get_centroid(self):
         ## check crosses the north pole
         center = get_centroid([Point(0.0, 80.0), Point(180.0,80.0)])
