@@ -62,7 +62,7 @@ elif 1 == 0:
 else:
     print('else clause')
 
-if d.has_key('a'):
+if 'a' in d:
     print(d['a'])
 else:
     print('not found')
@@ -122,7 +122,7 @@ def list_files(startdir):
     for element in os.listdir(startdir):
         path = os.path.join(startdir, element)
         if os.path.isfile(path):
-            print path
+            print(path)
             root, extension = os.path.splitext(path)
             if extension.lower() == '.dll': # add an extra extension to dll's
                 shutil.copyfile(path, path + '.REMOVETHIS')
@@ -139,9 +139,9 @@ list_files(startdir)
 for root, directories, files in os.walk(startdir, topdown=True):
     print 'dir : %s' % root
     if files:
-        print 'files :'
+        print('files :')
         for f in files:
-            print '\t', os.path.join(root, f)
+            print('\t', os.path.join(root, f))
 
 # 4) reading, parsing and writing files
 
