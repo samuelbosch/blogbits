@@ -28,15 +28,17 @@ module SimpleReadWrite = //
         | Some(v) -> writer.Write(v)
         | None -> writer.Write(Int32.MinValue)
 
-    let writeValues fileName (values:int option [][]) =
+    let writeValues fileName (values:seq<int option>) =
         use writer = new BinaryWriter(File.Open(fileName, FileMode.OpenOrCreate))
         values
-        |> Seq.concat
         |> Seq.iter (writeValue writer)
-        writer.Write(1.250F);
+        
     
     let readValue (reader:BinaryReader) cellIndex = 
-        reader.BaseStream.Seek(cellIndex*4L,SeekOrigin.Begin) |> ignore
+        // set stream to correct location
+        reader.BaseStream.Position <- cellIndex*4L
+
+        
         let value = reader.ReadInt32()
         if value <> Int32.MinValue then
             Some(value) 
@@ -45,9 +47,21 @@ module SimpleReadWrite = //
         
     let readValues fileName indices = 
         use reader = new BinaryReader(File.Open(fileName, FileMode.Open))
-        let readValueFromReader = readValue reader
         // Performance IDEA: sort the indices
-        Seq.map readValueFromReader indices
+        // Use array to force value creation (otherwise reader goes out of scope)
+        
+        let values = Array.map (readValue reader) (Array.ofSeq indices)
+        values
+
+    let test() = 
+        let fileName = @"D:\temp\testSimpleReadWrite.sbg" // *.sbg simple binary grid
+        let initial = [None;Some(Int32.MinValue+1);Some(Int32.MaxValue);None;Some(0);Some(1);Some(-1);None;Some(2);Some(213);None]
+
+        writeValues fileName initial
+        let expected = Seq.concat ([[initial.[4];initial.[3];initial.[4];initial.[4];initial.[2]];initial])
+        let actual = readValues fileName (Seq.concat [[4L;3L;4L;4L;2L];[0L..(initial.LongCount()-1L)]])
+        let result = Seq.zip actual expected |> Seq.forall (fun (a, b) -> a = b)
+        printf "Simple read write test returned %b" result
 
 module AsciiToBin =
 
@@ -85,8 +99,10 @@ module AsciiToBin =
         bitmap, values
 
 module Test =
-    let writeValues = 
-        AsciiToBin.writeValues @"D:\temp\write_cells.bin" [[Option(1);Option(2);None]]
+    let runall() =
+        SimpleReadWrite.test()
+
+Test.runall()
         
-        
+
         
