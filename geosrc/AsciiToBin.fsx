@@ -22,7 +22,8 @@ module PSeqOrdered =
     let map (mapping:'a->'b) (source:seq<'a>) =
         source.AsParallel().AsOrdered().Select(mapping)
 
-module SimpleReadWrite = // 
+module SimpleReadWrite = 
+
     let writeValue (writer:BinaryWriter) (value:int option) =
         match value with
         | Some(v) -> writer.Write(v)
@@ -48,9 +49,8 @@ module SimpleReadWrite = //
     let readValues fileName indices = 
         use reader = new BinaryReader(File.Open(fileName, FileMode.Open))
         // Performance IDEA: sort the indices
-        // Use array to force value creation (otherwise reader goes out of scope)
-        
-        let values = Array.map (readValue reader) (Array.ofSeq indices)
+        // Use list or array to force value creation (otherwise reader goes out of scope)
+        let values = List.map (readValue reader) (List.ofSeq indices)
         values
 
     let test() = 
@@ -61,7 +61,7 @@ module SimpleReadWrite = //
         let expected = Seq.concat ([[initial.[4];initial.[3];initial.[4];initial.[4];initial.[2]];initial])
         let actual = readValues fileName (Seq.concat [[4L;3L;4L;4L;2L];[0L..(initial.LongCount()-1L)]])
         let result = Seq.zip actual expected |> Seq.forall (fun (a, b) -> a = b)
-        printf "Simple read write test returned %b" result
+        printfn "Simple read write test returned %b" result
 
 module AsciiToBin =
 
@@ -77,10 +77,8 @@ module AsciiToBin =
         //let somes = parsed |> Array.filter Option.isSome |> Array.map (fun x -> x.Value)
         (bitmap, parsed)
 
-
-
-    let loadAscii path =
-        let lines = File.ReadLines(path) 
+    let loadAscii fileName =
+        let lines = File.ReadLines(fileName) 
         let isHeader (l:string) = (l.Length < 1000)
         let header = lines.TakeWhile(isHeader).ToDictionary((fun (l:string) -> l.Split([|' '|], StringSplitOptions.RemoveEmptyEntries).[0]), (fun (l:string) -> l.TrimEnd([|'\n'|]).Split([|' '|]).Last()))
         let mutable mnodata = ""
@@ -98,10 +96,72 @@ module AsciiToBin =
             |> Array.unzip
         bitmap, values
 
+    let asciiToBin inFileName outFileName = 
+        let (bitmap, values) = loadAscii inFileName
+        SimpleReadWrite.writeValues outFileName (Seq.concat values)
+
+    let queryBin indices fileName =
+        SimpleReadWrite.readValues fileName indices
+    
+    let testPrepareLoad fileName = 
+        let sbg = Path.Combine(@"D:\temp\", Path.GetFileName(fileName))
+        if (not (File.Exists(sbg))) then
+            asciiToBin fileName sbg
+        sbg
+
+    let testRandomQuery name paths outerlen innerlen =
+        printfn "START %s" name
+        let sbgPaths = paths |> Array.map testPrepareLoad
+        
+        let r = new System.Random(1)
+        let sw = new System.Diagnostics.Stopwatch()
+        let len = outerlen
+        let arr : int64 [] = Array.zeroCreate len
+        let mutable result = null
+        for i=0 to len-1 do
+            sw.Restart()
+            let indices = [1..innerlen] |> List.map (fun i -> (int64 (r.Next(0, 2160*1080)) ))
+            let indices = indices.OrderBy(fun x -> x)
+            result <- Array.map (queryBin indices) sbgPaths
+
+            sw.Stop()
+            arr.[i] <- sw.ElapsedMilliseconds
+
+        printfn "avg %f ms" (Array.averageBy float arr)
+        printfn "min %d ms" (Array.min arr)
+        printfn "max %d ms" (Array.max arr)
+        printfn "sum %d ms" (Array.sum arr)
+        result
+
+
+    let testSmallMarspec() =
+        let result = testRandomQuery "testSmallMarspec" [|@"D:\a\data\marspec\MARSPEC_10m\ascii\bathy_10m.asc"|] 10 10000 
+        printfn "result: %A" result
+        
+
+    let testAllBioOracle() =
+        ignore // TODO
+
+    
+    let testAllMarspec10m() =
+        // fetch 1000 times, 100 random values from 40 marspec layers
+
+        let root = @"D:\a\data\marspec\MARSPEC_10m\ascii\"
+        let paths = Directory.GetFiles(root, "*.asc")
+        testRandomQuery "testAllMarspec10m" paths 100 1000 |> ignore
+        // 39s 10000 * 10
+        // 22s 1000 * 100
+        // 18s 100 * 1000
+
+
+    let testGebco() =
+        ignore // TODO
+
 module Test =
     let runall() =
         SimpleReadWrite.test()
-
+        AsciiToBin.testSmallMarspec()
+        AsciiToBin.testAllMarspec10m()
 Test.runall()
         
 
