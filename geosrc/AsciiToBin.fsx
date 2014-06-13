@@ -35,19 +35,6 @@ module SimpleReadWrite =
         use writer = new BinaryWriter(File.Open(fileName, FileMode.OpenOrCreate))
         values
         |> Seq.iter (writeValue writer)
-    
-    let cache = Dictionary<string, BinaryReader>()
-    let clearCache() =
-        for key in cache.Keys do
-            cache.[key].Dispose()
-        cache.Clear()
-    let getreader fileName =
-        if cache.ContainsKey(fileName) then cache.[fileName]
-        else 
-            let res = new BinaryReader(File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
-            cache.[fileName] <- res
-            res 
-
             
     let readValue (reader:BinaryReader) cellIndex = 
         // set stream to correct location
@@ -57,27 +44,13 @@ module SimpleReadWrite =
         | v -> Some(v)
         
     let readValues fileName indices = 
-        //use reader = new BinaryReader(File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
-        let reader = getreader fileName
+        use reader = new BinaryReader(File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
         // Use list or array to force creation of values (otherwise reader gets disposed before the values are read)
         let values = List.map (readValue reader) (List.ofSeq indices)
         values
 
 module MemoryMappedRead =
     open System.IO.MemoryMappedFiles
-
-    let cache = Dictionary<string, MemoryMappedFile>()
-    let clearCache() =
-        for key in cache.Keys do
-            cache.[key].Dispose()
-        cache.Clear()
-
-    let getmmf fileName =
-        if cache.ContainsKey(fileName) then cache.[fileName]
-        else 
-            let res = MemoryMappedFile.CreateFromFile(fileName, FileMode.Open)
-            cache.[fileName] <- res
-            res 
 
     let readValue (reader:MemoryMappedViewAccessor) offset cellIndex =
         let position = (cellIndex*4L) - offset
@@ -86,8 +59,7 @@ module MemoryMappedRead =
         | v -> Some(v)
         
     let readValues fileName indices =
-        //use mmf = MemoryMappedFile.CreateFromFile(fileName, FileMode.Open)
-        let mmf = getmmf fileName
+        use mmf = MemoryMappedFile.CreateFromFile(fileName, FileMode.Open)
         let offset = (Seq.min indices ) * 4L
         let last = (Seq.max indices) * 4L
         let length = 4L+last-offset
@@ -106,7 +78,6 @@ module AsciiToBin =
     let parseRow nodata (values:string []) =
         let parsed = values |> Array.map (parseValue nodata)
         let bitmap = parsed |> Array.map Option.isSome |> BitMap.init
-        //let somes = parsed |> Array.filter Option.isSome |> Array.map (fun x -> x.Value)
         (bitmap, parsed)
 
     let loadAscii fileName =
@@ -133,8 +104,8 @@ module AsciiToBin =
         SimpleReadWrite.writeValues outFileName (Seq.concat values)
 
     let queryBin indices fileName =
-        SimpleReadWrite.readValues fileName indices
-        //MemoryMappedRead.readValues fileName indices
+        //SimpleReadWrite.readValues fileName indices
+        MemoryMappedRead.readValues fileName indices
     
     let testPrepareLoad fileName = 
         let sbg = Path.Combine(@"D:\temp\", Path.GetFileNameWithoutExtension(fileName) + ".sbg")
@@ -166,25 +137,19 @@ module AsciiToBin =
         printfn "sum %d ms" (Array.sum arr)
         result
 
-
     let testSmallMarspec() =
         let result = testRandomQuery "testSmallMarspec" [|@"D:\a\data\marspec\MARSPEC_10m\ascii\bathy_10m.asc"|] 10 10000 
         printfn "result: %A" result
         
-
     let testAllBioOracle() =
         ignore // TODO
 
-    
     let testAllMarspec10m() =
         // fetch 1000 times, 100 random values from 40 marspec layers
 
         let root = @"D:\a\data\marspec\MARSPEC_10m\ascii\"
         let paths = Directory.GetFiles(root, "*.asc")
         testRandomQuery "testAllMarspec10m" paths 100 1000 |> ignore
-        MemoryMappedRead.clearCache()
-        SimpleReadWrite.clearCache()
-        // SimpleBinaryReadWrite
         // 39s 10000 * 10
         // 22s 1000 * 100
         // 17s 100 * 1000
