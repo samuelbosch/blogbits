@@ -1,4 +1,5 @@
-﻿open System
+﻿
+open System
 open System.IO
 open System.Collections.Generic
 open System.Collections
@@ -19,6 +20,7 @@ module BitMap =
         count
 
 module PSeqOrdered =
+
     let map (mapping:'a->'b) (source:seq<'a>) =
         source.AsParallel().AsOrdered().Select(mapping)
 
@@ -33,35 +35,65 @@ module SimpleReadWrite =
         use writer = new BinaryWriter(File.Open(fileName, FileMode.OpenOrCreate))
         values
         |> Seq.iter (writeValue writer)
-        
     
+    let cache = Dictionary<string, BinaryReader>()
+    let clearCache() =
+        for key in cache.Keys do
+            cache.[key].Dispose()
+        cache.Clear()
+    let getreader fileName =
+        if cache.ContainsKey(fileName) then cache.[fileName]
+        else 
+            let res = new BinaryReader(File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
+            cache.[fileName] <- res
+            res 
+
+            
     let readValue (reader:BinaryReader) cellIndex = 
         // set stream to correct location
         reader.BaseStream.Position <- cellIndex*4L
-
-        
-        let value = reader.ReadInt32()
-        if value <> Int32.MinValue then
-            Some(value) 
-        else 
-            None
+        match reader.ReadInt32() with
+        | Int32.MinValue -> None
+        | v -> Some(v)
         
     let readValues fileName indices = 
-        use reader = new BinaryReader(File.Open(fileName, FileMode.Open))
-        // Performance IDEA: sort the indices
-        // Use list or array to force value creation (otherwise reader goes out of scope)
+        //use reader = new BinaryReader(File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
+        let reader = getreader fileName
+        // Use list or array to force creation of values (otherwise reader gets disposed before the values are read)
         let values = List.map (readValue reader) (List.ofSeq indices)
         values
 
-    let test() = 
-        let fileName = @"D:\temp\testSimpleReadWrite.sbg" // *.sbg simple binary grid
-        let initial = [None;Some(Int32.MinValue+1);Some(Int32.MaxValue);None;Some(0);Some(1);Some(-1);None;Some(2);Some(213);None]
+module MemoryMappedRead =
+    open System.IO.MemoryMappedFiles
 
-        writeValues fileName initial
-        let expected = Seq.concat ([[initial.[4];initial.[3];initial.[4];initial.[4];initial.[2]];initial])
-        let actual = readValues fileName (Seq.concat [[4L;3L;4L;4L;2L];[0L..(initial.LongCount()-1L)]])
-        let result = Seq.zip actual expected |> Seq.forall (fun (a, b) -> a = b)
-        printfn "Simple read write test returned %b" result
+    let cache = Dictionary<string, MemoryMappedFile>()
+    let clearCache() =
+        for key in cache.Keys do
+            cache.[key].Dispose()
+        cache.Clear()
+
+    let getmmf fileName =
+        if cache.ContainsKey(fileName) then cache.[fileName]
+        else 
+            let res = MemoryMappedFile.CreateFromFile(fileName, FileMode.Open)
+            cache.[fileName] <- res
+            res 
+
+    let readValue (reader:MemoryMappedViewAccessor) offset cellIndex =
+        let position = (cellIndex*4L) - offset
+        match reader.ReadInt32(position) with
+        | Int32.MinValue -> None
+        | v -> Some(v)
+        
+    let readValues fileName indices =
+        //use mmf = MemoryMappedFile.CreateFromFile(fileName, FileMode.Open)
+        let mmf = getmmf fileName
+        let offset = (Seq.min indices ) * 4L
+        let last = (Seq.max indices) * 4L
+        let length = 4L+last-offset
+        use reader = mmf.CreateViewAccessor(offset, length, MemoryMappedFileAccess.Read)
+        let values = (List.ofSeq indices) |> List.map (readValue reader offset)
+        values
 
 module AsciiToBin =
 
@@ -102,9 +134,10 @@ module AsciiToBin =
 
     let queryBin indices fileName =
         SimpleReadWrite.readValues fileName indices
+        //MemoryMappedRead.readValues fileName indices
     
     let testPrepareLoad fileName = 
-        let sbg = Path.Combine(@"D:\temp\", Path.GetFileName(fileName))
+        let sbg = Path.Combine(@"D:\temp\", Path.GetFileNameWithoutExtension(fileName) + ".sbg")
         if (not (File.Exists(sbg))) then
             asciiToBin fileName sbg
         sbg
@@ -149,17 +182,45 @@ module AsciiToBin =
         let root = @"D:\a\data\marspec\MARSPEC_10m\ascii\"
         let paths = Directory.GetFiles(root, "*.asc")
         testRandomQuery "testAllMarspec10m" paths 100 1000 |> ignore
+        MemoryMappedRead.clearCache()
+        SimpleReadWrite.clearCache()
+        // SimpleBinaryReadWrite
         // 39s 10000 * 10
         // 22s 1000 * 100
-        // 18s 100 * 1000
-
+        // 17s 100 * 1000
+        // 16s 100 * 1000 with BinaryReader caching
+        // MemoryMappedRead
+        // 86s 10000 * 10
+        // 28s 1000 * 100
+        // 10s 100*1000
+        // 9s 100*1000 with MemoryMappedFile caching
+        
 
     let testGebco() =
         ignore // TODO
 
 module Test =
+    let simpleReadWriteTest() = 
+        let fileName = @"D:\temp\testSimpleReadWrite.sbg" // *.sbg simple binary grid
+        let initial = [None;Some(Int32.MinValue+1);Some(Int32.MaxValue);None;Some(0);Some(1);Some(-1);None;Some(2);Some(213);None]
+
+        SimpleReadWrite.writeValues fileName initial
+        let expected = Seq.concat ([[initial.[4];initial.[3];initial.[4];initial.[4];initial.[2]];initial])
+        let actual = SimpleReadWrite.readValues fileName (Seq.concat [[4L;3L;4L;4L;2L];[0L..(initial.LongCount()-1L)]])
+        let result = Seq.zip actual expected |> Seq.forall (fun (a, b) -> a = b)
+        printfn "Simple read write test returned %b" result
+
+    let memoryMappedReadTest() =
+        let fileName = @"D:\temp\testSimpleReadWrite.sbg" // *.sbg simple binary grid
+        let initial = [None;Some(Int32.MinValue+1);Some(Int32.MaxValue);None;Some(0);Some(1);Some(-1);None;Some(2);Some(213);None]
+        let expected = Seq.concat ([[initial.[4];initial.[3];initial.[4];initial.[4];initial.[2]];initial])
+        let actual = MemoryMappedRead.readValues fileName (Seq.concat [[4L;3L;4L;4L;2L];[0L..(initial.LongCount()-1L)]])
+        let result = Seq.zip actual expected |> Seq.forall (fun (a, b) -> a = b)
+        printfn "Memory mapped read test returned %b" result
+
     let runall() =
-        SimpleReadWrite.test()
+        simpleReadWriteTest()
+        memoryMappedReadTest()
         AsciiToBin.testSmallMarspec()
         AsciiToBin.testAllMarspec10m()
 Test.runall()
