@@ -5,19 +5,43 @@ open System.Collections.Generic
 open System.Collections
 open System.Linq
 
+module Dict = 
+
+    let tryGetDefault (d:IDictionary<'k,'v>) (key:'k) (defaultValue:'v) =
+        if d.ContainsKey(key) then
+            d.[key]
+        else
+            defaultValue
+
 module BitMap =
+
     type bitmap = System.Collections.BitArray
     let init (bools:bool []) = new System.Collections.BitArray(bools)
 
     let isSet index (b:bitmap) =
-        b.Get(index)
+        b.Get(int index)
 
-    let countUpto (uptoIndex:int) (b:bitmap) = 
-        let mutable count = 0
-        for i=0 to uptoIndex-1 do
+    let countUpto (uptoIndex:int64) (b:bitmap) = 
+        let mutable count = 0L
+        for i=0 to (int uptoIndex)-1 do
             if b.Get(i) then
-                count <- count+1
+                count <- count+1L
         count
+
+    let countSkippedUpto (uptoIndex:int64) (b:bitmap) =
+        let count = countUpto uptoIndex b
+        uptoIndex - count
+
+    let sparseIndex (map:bitmap[]) (cellIndex:int64) =
+        let ncols = int64 map.[0].Length
+        let rowIndex = cellIndex / ncols
+        let colIndex = (cellIndex - (rowIndex*ncols))
+        if isSet colIndex map.[int rowIndex] then
+            let skippedCount = map |> Seq.take (int rowIndex) |> Seq.map ((countSkippedUpto ncols)>>int64) |> Seq.sum
+            let skippedCount = skippedCount + int64 (countSkippedUpto colIndex map.[int rowIndex])
+            Some(cellIndex - skippedCount)
+        else
+            None
 
 module PSeqOrdered =
 
@@ -49,7 +73,8 @@ module SimpleReadWrite =
         let values = List.map (readValue reader) (List.ofSeq indices)
         values
 
-module MemoryMappedRead =
+module MemoryMappedSimpleRead =
+
     open System.IO.MemoryMappedFiles
 
     let readValue (reader:MemoryMappedViewAccessor) offset cellIndex =
@@ -67,8 +92,47 @@ module MemoryMappedRead =
         let values = (List.ofSeq indices) |> List.map (readValue reader offset)
         values
 
-module AsciiToBin =
+module SparseReadWrite = 
+    open BitMap
+    let writeBitMap fileName (map:bitmap []) =
+        use writer = new BinaryWriter(File.Open(fileName, FileMode.OpenOrCreate))
+        let nrows = map.Length
+        let ncols = map.[0].Length
+        writer.Write(nrows)
+        writer.Write(ncols)
 
+        let boolArray = Array.init ncols (fun i -> true)
+        for bitarray in map do
+            bitarray.CopyTo(boolArray, 0)
+            boolArray |> Array.iter (fun b -> (writer.Write(b))) 
+
+    let writeValues fileName (values:seq<int option>) =
+        use writer = new BinaryWriter(File.Open(fileName, FileMode.OpenOrCreate))
+        values |> Seq.iter (fun v -> if v.IsSome then writer.Write(v.Value))
+
+//    let readValue (reader:BinaryReader)  cellIndex = 
+//        // set stream to correct location
+//        reader.BaseStream.Position <- cellIndex*4L
+//        match reader.ReadInt32() with
+//        | Int32.MinValue -> None
+//        | v -> Some(v)
+        
+    let readValue (map:bitmap []) (reader:BinaryReader)  cellIndex =
+        match BitMap.sparseIndex map cellIndex with
+        | Some(index) -> SimpleReadWrite.readValue reader index
+        | None -> None
+        
+    let readValues (map:bitmap []) valuesFileName indices = 
+        use reader = new BinaryReader(File.Open(valuesFileName, FileMode.Open, FileAccess.Read, FileShare.Read))
+        // Use list or array to force creation of values (otherwise reader gets disposed before the values are read)
+        let values = 
+            indices
+            |> List.ofSeq
+            
+//        let values = List.map (readValue reader) (List.ofSeq indices)
+        values
+
+module AsciiProvider = 
     let parseValue nodata (v:string) =
         if v <> nodata then
             Some(int v)
@@ -80,37 +144,40 @@ module AsciiToBin =
         let bitmap = parsed |> Array.map Option.isSome |> BitMap.init
         (bitmap, parsed)
 
-    let loadAscii fileName =
+    let read fileName =
         let lines = File.ReadLines(fileName) 
         let isHeader (l:string) = (l.Length < 1000)
         let header = lines.TakeWhile(isHeader).ToDictionary((fun (l:string) -> l.Split([|' '|], StringSplitOptions.RemoveEmptyEntries).[0]), (fun (l:string) -> l.TrimEnd([|'\n'|]).Split([|' '|]).Last()))
-        let mutable mnodata = ""
-        if not (header.TryGetValue("NODATA_value", &(mnodata))) then 
-            mnodata <- "-99999"
-        let nodata = mnodata
+        let nodata = Dict.tryGetDefault header "NODATA_value" "-99999"
 
         let inline splitLine (x:string) = x.Trim([|' '; '\n'|]).Split([|' '|], StringSplitOptions.RemoveEmptyEntries)
-        let values = lines.SkipWhile(isHeader)
-
+        
         let bitmap, values = 
-            values
+            lines.SkipWhile(isHeader)
             |> PSeqOrdered.map (splitLine >> (parseRow nodata)) // PSeq changes order of the sequence
             |> Array.ofSeq
             |> Array.unzip
         bitmap, values
 
-    let asciiToBin inFileName outFileName = 
-        let (bitmap, values) = loadAscii inFileName
-        SimpleReadWrite.writeValues outFileName (Seq.concat values)
+    let convertTo extension converter inFileName outFileName =
+        let (bitmap, values) = read inFileName
+        converter (outFileName+extension) bitmap values // (Seq.concat values) bitmap
 
-    let queryBin indices fileName =
-        //SimpleReadWrite.readValues fileName indices
-        MemoryMappedRead.readValues fileName indices
+    let convertToSbg = 
+        convertTo ".sbg" (fun outfile _ values -> SimpleReadWrite.writeValues outfile (Seq.concat values))
     
+//    let convertToSbg2 =
+//        convertTo ".sbg2" SimpleReadWrite.writeValues
+
+module SbgReader =
+    let query indices fileName =
+        //SimpleReadWrite.readValues fileName indices
+        MemoryMappedSimpleRead.readValues fileName indices
+     
     let testPrepareLoad fileName = 
-        let sbg = Path.Combine(@"D:\temp\", Path.GetFileNameWithoutExtension(fileName) + ".sbg")
+        let sbg = Path.Combine(@"D:\temp\", Path.GetFileNameWithoutExtension(fileName))
         if (not (File.Exists(sbg))) then
-            asciiToBin fileName sbg
+            AsciiProvider.convertToSbg fileName sbg
         sbg
 
     let testRandomQuery name paths outerlen innerlen =
@@ -126,7 +193,7 @@ module AsciiToBin =
             sw.Restart()
             let indices = [1..innerlen] |> List.map (fun i -> (int64 (r.Next(0, 2160*1080)) ))
             let indices = indices.OrderBy(fun x -> x)
-            result <- Array.map (queryBin indices) sbgPaths
+            result <- Array.map (query indices) sbgPaths
 
             sw.Stop()
             arr.[i] <- sw.ElapsedMilliseconds
@@ -140,7 +207,6 @@ module AsciiToBin =
     let testSmallMarspec() =
         let result = testRandomQuery "testSmallMarspec" [|@"D:\a\data\marspec\MARSPEC_10m\ascii\bathy_10m.asc"|] 10 10000 
         printfn "result: %A" result
-        
     let testAllBioOracle() =
         ignore // TODO
 
@@ -179,15 +245,15 @@ module Test =
         let fileName = @"D:\temp\testSimpleReadWrite.sbg" // *.sbg simple binary grid
         let initial = [None;Some(Int32.MinValue+1);Some(Int32.MaxValue);None;Some(0);Some(1);Some(-1);None;Some(2);Some(213);None]
         let expected = Seq.concat ([[initial.[4];initial.[3];initial.[4];initial.[4];initial.[2]];initial])
-        let actual = MemoryMappedRead.readValues fileName (Seq.concat [[4L;3L;4L;4L;2L];[0L..(initial.LongCount()-1L)]])
+        let actual = MemoryMappedSimpleRead.readValues fileName (Seq.concat [[4L;3L;4L;4L;2L];[0L..(initial.LongCount()-1L)]])
         let result = Seq.zip actual expected |> Seq.forall (fun (a, b) -> a = b)
         printfn "Memory mapped read test returned %b" result
 
     let runall() =
         simpleReadWriteTest()
         memoryMappedReadTest()
-        AsciiToBin.testSmallMarspec()
-        AsciiToBin.testAllMarspec10m()
+        SbgReader.testSmallMarspec()
+        SbgReader.testAllMarspec10m()
 Test.runall()
         
 
