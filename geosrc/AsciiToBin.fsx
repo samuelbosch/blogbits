@@ -1,5 +1,4 @@
-﻿
-open System
+﻿open System
 open System.IO
 open System.Collections.Generic
 open System.Collections
@@ -16,7 +15,11 @@ module Dict =
 module BitMap =
 
     type bitmap = System.Collections.BitArray
-    let init (bools:bool []) = new System.Collections.BitArray(bools)
+    
+    let fromArray (bools:bool []) = new System.Collections.BitArray(bools)
+    let init n (f:int->bool) = 
+        let bools = Array.init n f
+        fromArray bools
 
     let isSet index (b:bitmap) =
         b.Get(int index)
@@ -94,6 +97,8 @@ module MemoryMappedSimpleRead =
 
 module SparseReadWrite = 
     open BitMap
+    let bitmapExtension = ".sbm" // sparse binary map
+    let valuesExtension = ".sbv" // sparse binary values
     let writeBitMap fileName (map:bitmap []) =
         use writer = new BinaryWriter(File.Open(fileName, FileMode.OpenOrCreate))
         let nrows = map.Length
@@ -110,26 +115,32 @@ module SparseReadWrite =
         use writer = new BinaryWriter(File.Open(fileName, FileMode.OpenOrCreate))
         values |> Seq.iter (fun v -> if v.IsSome then writer.Write(v.Value))
 
-//    let readValue (reader:BinaryReader)  cellIndex = 
-//        // set stream to correct location
-//        reader.BaseStream.Position <- cellIndex*4L
-//        match reader.ReadInt32() with
-//        | Int32.MinValue -> None
-//        | v -> Some(v)
-        
+    let write filenameWithoutExtension bitmap values =
+        writeBitMap (Path.ChangeExtension(filenameWithoutExtension, bitmapExtension)) bitmap
+        let valuesPath = (Path.ChangeExtension(filenameWithoutExtension, valuesExtension))
+        writeValues valuesPath values
+    
+    let readBitMap bitMapFileName = 
+        use reader = new BinaryReader(File.Open(bitMapFileName, FileMode.Open, FileAccess.Read, FileShare.Read))
+        let nrows = reader.ReadInt32()
+        let ncols = reader.ReadInt32()
+        let createRowBitMap i = BitMap.init ncols (fun i -> reader.ReadBoolean())
+        let map = Array.init nrows createRowBitMap
+        map
+
     let readValue (map:bitmap []) (reader:BinaryReader)  cellIndex =
         match BitMap.sparseIndex map cellIndex with
         | Some(index) -> SimpleReadWrite.readValue reader index
         | None -> None
         
-    let readValues (map:bitmap []) valuesFileName indices = 
+    let readValues valuesFileName indices = 
+        let map = readBitMap (Path.ChangeExtension(valuesFileName, bitmapExtension))
         use reader = new BinaryReader(File.Open(valuesFileName, FileMode.Open, FileAccess.Read, FileShare.Read))
         // Use list or array to force creation of values (otherwise reader gets disposed before the values are read)
         let values = 
             indices
             |> List.ofSeq
-            
-//        let values = List.map (readValue reader) (List.ofSeq indices)
+            |> List.map (readValue map reader)
         values
 
 module AsciiProvider = 
@@ -141,11 +152,11 @@ module AsciiProvider =
 
     let parseRow nodata (values:string []) =
         let parsed = values |> Array.map (parseValue nodata)
-        let bitmap = parsed |> Array.map Option.isSome |> BitMap.init
+        let bitmap = parsed |> Array.map Option.isSome |> (fun bools -> (new System.Collections.BitArray(bools)))
         (bitmap, parsed)
 
     let read fileName =
-        let lines = File.ReadLines(fileName) 
+        let lines = File.ReadLines(fileName)
         let isHeader (l:string) = (l.Length < 1000)
         let header = lines.TakeWhile(isHeader).ToDictionary((fun (l:string) -> l.Split([|' '|], StringSplitOptions.RemoveEmptyEntries).[0]), (fun (l:string) -> l.TrimEnd([|'\n'|]).Split([|' '|]).Last()))
         let nodata = Dict.tryGetDefault header "NODATA_value" "-99999"
@@ -160,75 +171,25 @@ module AsciiProvider =
         bitmap, values
 
     let convertTo extension converter inFileName outFileName =
-        let (bitmap, values) = read inFileName
-        converter (outFileName+extension) bitmap values // (Seq.concat values) bitmap
+        let outFileName = Path.ChangeExtension(outFileName, extension)
+        if (not (File.Exists(outFileName))) then
+            let (bitmap, values) = read inFileName
+            converter (outFileName) bitmap (Seq.concat values) // (Seq.concat values) bitmap
+        outFileName
 
-    let convertToSbg = 
-        convertTo ".sbg" (fun outfile _ values -> SimpleReadWrite.writeValues outfile (Seq.concat values))
+    let convertToSimple = 
+        convertTo ".sbg" (fun outfile _ values -> SimpleReadWrite.writeValues outfile values)
     
-//    let convertToSbg2 =
-//        convertTo ".sbg2" SimpleReadWrite.writeValues
-
-module SbgReader =
-    let query indices fileName =
+    let convertToSparse = 
+        convertTo SparseReadWrite.valuesExtension SparseReadWrite.write
+    
+module Reader =
+    let simpleQuery indices fileName =
         //SimpleReadWrite.readValues fileName indices
         MemoryMappedSimpleRead.readValues fileName indices
-     
-    let testPrepareLoad fileName = 
-        let sbg = Path.Combine(@"D:\temp\", Path.GetFileNameWithoutExtension(fileName))
-        if (not (File.Exists(sbg))) then
-            AsciiProvider.convertToSbg fileName sbg
-        sbg
 
-    let testRandomQuery name paths outerlen innerlen =
-        printfn "START %s" name
-        let sbgPaths = paths |> Array.map testPrepareLoad
-        
-        let r = new System.Random(1)
-        let sw = new System.Diagnostics.Stopwatch()
-        let len = outerlen
-        let arr : int64 [] = Array.zeroCreate len
-        let mutable result = null
-        for i=0 to len-1 do
-            sw.Restart()
-            let indices = [1..innerlen] |> List.map (fun i -> (int64 (r.Next(0, 2160*1080)) ))
-            let indices = indices.OrderBy(fun x -> x)
-            result <- Array.map (query indices) sbgPaths
-
-            sw.Stop()
-            arr.[i] <- sw.ElapsedMilliseconds
-
-        printfn "avg %f ms" (Array.averageBy float arr)
-        printfn "min %d ms" (Array.min arr)
-        printfn "max %d ms" (Array.max arr)
-        printfn "sum %d ms" (Array.sum arr)
-        result
-
-    let testSmallMarspec() =
-        let result = testRandomQuery "testSmallMarspec" [|@"D:\a\data\marspec\MARSPEC_10m\ascii\bathy_10m.asc"|] 10 10000 
-        printfn "result: %A" result
-    let testAllBioOracle() =
-        ignore // TODO
-
-    let testAllMarspec10m() =
-        // fetch 1000 times, 100 random values from 40 marspec layers
-
-        let root = @"D:\a\data\marspec\MARSPEC_10m\ascii\"
-        let paths = Directory.GetFiles(root, "*.asc")
-        testRandomQuery "testAllMarspec10m" paths 100 1000 |> ignore
-        // 39s 10000 * 10
-        // 22s 1000 * 100
-        // 17s 100 * 1000
-        // 16s 100 * 1000 with BinaryReader caching
-        // MemoryMappedRead
-        // 86s 10000 * 10
-        // 28s 1000 * 100
-        // 10s 100*1000
-        // 9s 100*1000 with MemoryMappedFile caching
-        
-
-    let testGebco() =
-        ignore // TODO
+    let sparseQuery indices fileName =
+        SparseReadWrite.readValues fileName indices
 
 module Test =
     let simpleReadWriteTest() = 
@@ -249,12 +210,79 @@ module Test =
         let result = Seq.zip actual expected |> Seq.forall (fun (a, b) -> a = b)
         printfn "Memory mapped read test returned %b" result
 
+    let sparseReadWriteTest() =
+        let p = @"D:\temp\bathy_10m.asc"
+        let (bitmap, values) = AsciiProvider.read p
+        let p = AsciiProvider.convertToSparse p (Path.ChangeExtension(p, ""))
+        let results = SparseReadWrite.readValues p [1L;1654L;649L;963L]
+        ignore
+
+
+    let testPrepareLoad converter fileName = 
+        let sbg = Path.Combine(@"D:\temp\", Path.GetFileNameWithoutExtension(fileName))
+        converter fileName sbg
+
+    let testRandomQuery converter query name paths outerlen innerlen =
+        printfn "START %s" name
+        let sbgPaths = paths |> Array.map (testPrepareLoad converter)
+        
+        let r = new System.Random(1)
+        let sw = new System.Diagnostics.Stopwatch()
+        let len = outerlen
+        let arr : int64 [] = Array.zeroCreate len
+        let mutable result = null
+        for i=0 to len-1 do
+            sw.Restart()
+            let indices = [1..innerlen] |> List.map (fun i -> (int64 (r.Next(0, 2160*1080)) ))
+            let indices = indices.OrderBy(fun x -> x)
+            result <- Array.map (query indices) sbgPaths
+
+            sw.Stop()
+            arr.[i] <- sw.ElapsedMilliseconds
+
+        printfn "avg %f ms" (Array.averageBy float arr)
+        printfn "min %d ms" (Array.min arr)
+        printfn "max %d ms" (Array.max arr)
+        printfn "sum %d ms" (Array.sum arr)
+        result
+    let testSimpleRandom = testRandomQuery AsciiProvider.convertToSimple Reader.simpleQuery
+    let testSparseRandom = testRandomQuery AsciiProvider.convertToSparse Reader.sparseQuery 
+    let testSmallMarspec() =
+        let outerlen = 10
+        let innerlen = 10000
+        let result1 = testSimpleRandom "test simple SmallMarspec" [|@"D:\a\data\marspec\MARSPEC_10m\ascii\bathy_10m.asc"|] outerlen innerlen
+        let result2 = testSparseRandom "test sparse SmallMarspec" [|@"D:\a\data\marspec\MARSPEC_10m\ascii\bathy_10m.asc"|] outerlen innerlen
+        printfn "simple result: %A" result1
+        printfn "sparse result: %A" result2
+
+    let testAllBioOracle() =
+        ignore // TODO
+
+    let testAllMarspec10m() =
+        // fetch 1000 times, 100 random values from 40 marspec layers
+
+        let root = @"D:\a\data\marspec\MARSPEC_10m\ascii\"
+        let paths = Directory.GetFiles(root, "*.asc")
+        testSimpleRandom "test simple AllMarspec10m" paths 100 1000 |> ignore
+        // 39s 10000 * 10
+        // 22s 1000 * 100
+        // 17s 100 * 1000
+        // 16s 100 * 1000 with BinaryReader caching
+        // MemoryMappedRead
+        // 86s 10000 * 10
+        // 28s 1000 * 100
+        // 10s 100*1000
+        // 9s 100*1000 with MemoryMappedFile caching
+        
+
+    let testGebco() =
+        ignore // TODO
+
+
     let runall() =
         simpleReadWriteTest()
         memoryMappedReadTest()
-        SbgReader.testSmallMarspec()
-        SbgReader.testAllMarspec10m()
-Test.runall()
-        
+        testSmallMarspec()
+        testAllMarspec10m()
 
-        
+Test.runall()
