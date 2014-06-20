@@ -13,38 +13,36 @@ module Dict =
             defaultValue
 
 module BitMap =
-
-    type bitmap = System.Collections.BitArray * int // map * skipped count
+    type bitmap = bool [] * int64 // map * skipped count
     
     let ofArray (bools:bool []) = 
         let skippedCount = bools |> Seq.filter (not) |> Seq.length
-        ((new System.Collections.BitArray(bools)), skippedCount):bitmap
+        (bools, (int64 skippedCount)):bitmap
     
+    let transform (b:bitmap []) = 
+        let mutable total = 0L
+        for i=0 to b.Length-1 do
+            let (m,s):bitmap = b.[i] 
+            total <- total+s
+            b.[i] <- (m,total)
+
     let init n (f:int->bool) = 
         let bools = Array.init n f
-        ofArray bools    
-
-    let isSet index (b:bitmap) =
-        (fst b).Get(int index)
-
-    let countUpto (uptoIndex:int64) (b:bitmap) = 
-        let mutable count = 0L
-        for i=0 to (int uptoIndex)-1 do
-            if isSet i b then
-                count <- count+1L
-        count
-
-    let countSkippedUpto (uptoIndex:int64) (b:bitmap) =
-        let count = countUpto uptoIndex b
-        uptoIndex - count
+        ofArray bools
 
     let sparseIndex sparseIndexConsumer (map:bitmap[]) (cellIndex:int64) =
         let ncols = int64 (fst map.[0]).Length
-        let rowIndex = cellIndex / ncols
-        let colIndex = (cellIndex - (rowIndex*ncols))
-        if isSet (int colIndex) map.[int rowIndex] then
-            let skippedCount = map |> Seq.take (int rowIndex) |> Seq.map (snd>>int64) |> Seq.sum
-            let skippedCount = skippedCount + int64 (countSkippedUpto colIndex map.[int rowIndex])
+        let rowIndex = int (cellIndex / ncols)
+        let colIndex = int (cellIndex - ((int64 rowIndex)*ncols))
+        if (fst map.[rowIndex]).[colIndex] then
+            let mutable skippedCount = 0L
+            if rowIndex > 0 then
+                skippedCount <- (snd map.[rowIndex-1])
+            let m = fst  map.[rowIndex]
+            for i=0 to colIndex-1 do
+                if not (m.[i]) then
+                    skippedCount <- skippedCount+1L
+
             Some(sparseIndexConsumer (cellIndex - skippedCount))
         else
             None
@@ -140,6 +138,7 @@ module SparseReadWrite =
             let ncols = reader.ReadInt32()
             let createRowBitMap i = BitMap.init ncols (fun i -> reader.ReadBoolean())
             let map = Array.init nrows createRowBitMap
+            BitMap.transform map
             cache.Add(bitMapFileName, map)
             map
 
@@ -201,8 +200,8 @@ module AsciiProvider =
     
 module Reader =
     let simpleQuery indices fileName =
-        SimpleReadWrite.readValues fileName indices
-        //MemoryMappedSimpleRead.readValues fileName indices
+        //SimpleReadWrite.readValues fileName indices
+        MemoryMappedSimpleRead.readValues fileName indices
 
     let sparseQuery indices fileName =
         SparseReadWrite.readValues fileName indices
@@ -249,7 +248,7 @@ module Test =
         for i=0 to len-1 do
             sw.Restart()
             let indices = [1..innerlen] |> List.map (fun i -> (int64 (r.Next(0, 2160*1080)) ))
-            //let indices = indices.OrderBy(fun x -> x)
+            let indices = indices.OrderBy(fun x -> x)
             result <- Array.map (query indices) sbgPaths
             sw.Stop()
             arr.[i] <- sw.ElapsedMilliseconds
@@ -291,6 +290,9 @@ module Test =
         let root = @"D:\a\data\marspec\MARSPEC_10m\ascii\"
         let paths = Directory.GetFiles(root, "*.asc")
         testSimpleRandom "test simple AllMarspec10m" paths 100 1000 |> ignore
+        //testSparseRandom "test sparse AllMarspec10m" paths 10000 10 |> ignore
+        
+        // Simple
         // 39s 10000 * 10
         // 22s 1000 * 100
         // 17s 100 * 1000
@@ -300,6 +302,7 @@ module Test =
         // 28s 1000 * 100
         // 10s 100*1000
         // 9s 100*1000 with MemoryMappedFile caching
+        // Sparse
         
     let testGebco() =
         ignore // TODO
