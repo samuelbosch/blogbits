@@ -100,17 +100,33 @@ module SparseReadWrite =
     open BitMap
     let bitmapExtension = ".sbm" // sparse binary map
     let valuesExtension = ".sbv" // sparse binary values
+
+    let pow2 y = 1 <<< y
+
+    let writeBooleans (bools:bool []) (writer:BinaryWriter) =
+        // compress 8 booleans in one byte
+        let compressed = 
+            seq {
+                let b = ref 0uy
+                for i=0 to bools.Length-1 do
+                    let rem = (i  % 8)
+                    if rem = 0 && i<> 0 then 
+                        yield !b
+                        b := 0uy
+                    if bools.[i] then
+                        b := !b + (byte (pow2 rem))
+                yield !b
+            } |> Array.ofSeq
+        compressed |> (fun bytes -> writer.Write(bytes))
+
     let writeBitMap fileName (map:bitmap []) =
         use writer = new BinaryWriter(File.Open(fileName, FileMode.OpenOrCreate))
         let nrows = map.Length
         let ncols = (fst map.[0]).Length
         writer.Write(nrows)
         writer.Write(ncols)
-
-        let boolArray = Array.init ncols (fun i -> true)
-        for (bitarray,_) in map do
-            bitarray.CopyTo(boolArray, 0)
-            boolArray |> Array.iter (fun b -> (writer.Write(b))) 
+        for (boolArray,_) in map do
+            writeBooleans boolArray writer
 
     let writeValues fileName (values:seq<int option>) =
         use writer = new BinaryWriter(File.Open(fileName, FileMode.OpenOrCreate))
@@ -123,6 +139,12 @@ module SparseReadWrite =
     
     let cache = new Dictionary<string, bitmap []>()
 
+    let readBooleansRow ncols (reader:BinaryReader) =
+        let byteToBooleans (b:byte) = Array.init 8 (fun i -> ((pow2 i) &&& int b) > 0)
+        let n = Math.Ceiling((float ncols) / 8.0) |> int
+        let r = Array.init n (fun i -> byteToBooleans (reader.ReadByte()))
+        r |> Seq.concat |> Array.ofSeq
+
     let readBitMap bitMapFileName = 
         if cache.ContainsKey(bitMapFileName) then 
             cache.[bitMapFileName] 
@@ -131,7 +153,7 @@ module SparseReadWrite =
             use reader = new BinaryReader(File.Open(bitMapFileName, FileMode.Open, FileAccess.Read, FileShare.Read))
             let nrows = reader.ReadInt32()
             let ncols = reader.ReadInt32()
-            let createRowBitMap i = BitMap.init ncols (fun i -> reader.ReadBoolean())
+            let createRowBitMap i = BitMap.ofArray (readBooleansRow ncols reader)
             let map = Array.init nrows createRowBitMap
             BitMap.transform map
             cache.Add(bitMapFileName, map)
@@ -297,8 +319,11 @@ module Test =
         // 28s 1000 * 100
         // 10s 100*1000
         // 9s 100*1000 with MemoryMappedFile caching
-        // Sparse
-        
+        // Sparse (all with bitmap caching up front)
+        // 32s 10000 * 10
+        // 18s 1000 * 100
+        // 15s 100 * 1000
+
     let testGebco() =
         ignore // TODO
 
