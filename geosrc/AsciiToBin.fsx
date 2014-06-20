@@ -97,11 +97,6 @@ module MemoryMappedSimpleRead =
         values
 
 module SparseReadWrite = 
-    let time n f =
-        let sw = Diagnostics.Stopwatch.StartNew()
-        let x = f()
-        printfn "%s took %d ms" n (sw.ElapsedMilliseconds)
-        x
     open BitMap
     let bitmapExtension = ".sbm" // sparse binary map
     let valuesExtension = ".sbv" // sparse binary values
@@ -149,7 +144,7 @@ module SparseReadWrite =
         BitMap.sparseIndex read map cellIndex
 
     let readValues valuesFileName indices = 
-        let map = time "readBitMap" (fun () -> readBitMap (Path.ChangeExtension(valuesFileName, bitmapExtension)))
+        let map = readBitMap (Path.ChangeExtension(valuesFileName, bitmapExtension))
         use reader = new BinaryReader(File.Open(valuesFileName, FileMode.Open, FileAccess.Read, FileShare.Read))
         // Use list or array to force creation of values (otherwise reader gets disposed before the values are read)
         let values = 
