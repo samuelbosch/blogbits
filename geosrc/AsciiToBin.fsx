@@ -4,6 +4,27 @@ open System.Collections.Generic
 open System.Collections
 open System.Linq
 
+module BitConverter = 
+    let pow2 y = 1 <<< y
+    // convert booleans to bytes in a space efficient way
+    let FromBooleans (bools:bool []) =
+        seq {
+            let b = ref 0uy
+            for i=0 to bools.Length-1 do
+                let rem = (i  % 8)
+                if rem = 0 && i<> 0 then 
+                    yield !b
+                    b := 0uy
+                if bools.[i] then
+                    b := !b + (byte (pow2 rem))
+            yield !b
+        } |> Array.ofSeq
+    // to booleans only works for bytes created with FromBooleans
+    let ToBooleans (bytes:byte []) = 
+        bytes
+        |> Array.map (fun b -> Array.init 8 (fun i -> ((pow2 i) &&& int b) > 0))
+        |> Array.concat
+
 module Dict = 
 
     let tryGetDefault (d:IDictionary<'k,'v>) (key:'k) (defaultValue:'v) =
@@ -104,20 +125,8 @@ module SparseReadWrite =
     let pow2 y = 1 <<< y
 
     let writeBooleans (bools:bool []) (writer:BinaryWriter) =
-        // compress 8 booleans in one byte
-        let compressed = 
-            seq {
-                let b = ref 0uy
-                for i=0 to bools.Length-1 do
-                    let rem = (i  % 8)
-                    if rem = 0 && i<> 0 then 
-                        yield !b
-                        b := 0uy
-                    if bools.[i] then
-                        b := !b + (byte (pow2 rem))
-                yield !b
-            } |> Array.ofSeq
-        compressed |> (fun bytes -> writer.Write(bytes))
+        BitConverter.FromBooleans bools
+        |> (fun bytes -> writer.Write(bytes))
 
     let writeBitMap fileName (map:bitmap []) =
         use writer = new BinaryWriter(File.Open(fileName, FileMode.OpenOrCreate))
@@ -140,10 +149,9 @@ module SparseReadWrite =
     let cache = new Dictionary<string, bitmap []>()
 
     let readBooleansRow ncols (reader:BinaryReader) =
-        let byteToBooleans (b:byte) = Array.init 8 (fun i -> ((pow2 i) &&& int b) > 0)
-        let n = Math.Ceiling((float ncols) / 8.0) |> int
-        let r = Array.init n (fun i -> byteToBooleans (reader.ReadByte()))
-        r |> Seq.concat |> Array.ofSeq
+        let nbytes = int (ceil ((float ncols) / 8.0)) // n° of bytes in a row
+        Array.init nbytes (fun i -> reader.ReadByte())
+        |> BitConverter.ToBooleans
 
     let readBitMap bitMapFileName = 
         if cache.ContainsKey(bitMapFileName) then 
