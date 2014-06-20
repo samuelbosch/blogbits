@@ -14,20 +14,23 @@ module Dict =
 
 module BitMap =
 
-    type bitmap = System.Collections.BitArray
+    type bitmap = System.Collections.BitArray * int // map * skipped count
     
-    let fromArray (bools:bool []) = new System.Collections.BitArray(bools)
+    let ofArray (bools:bool []) = 
+        let skippedCount = bools |> Seq.filter (not) |> Seq.length
+        ((new System.Collections.BitArray(bools)), skippedCount):bitmap
+    
     let init n (f:int->bool) = 
         let bools = Array.init n f
-        fromArray bools
+        ofArray bools    
 
     let isSet index (b:bitmap) =
-        b.Get(int index)
+        (fst b).Get(int index)
 
     let countUpto (uptoIndex:int64) (b:bitmap) = 
         let mutable count = 0L
         for i=0 to (int uptoIndex)-1 do
-            if b.Get(i) then
+            if isSet i b then
                 count <- count+1L
         count
 
@@ -35,14 +38,14 @@ module BitMap =
         let count = countUpto uptoIndex b
         uptoIndex - count
 
-    let sparseIndex (map:bitmap[]) (cellIndex:int64) =
-        let ncols = int64 map.[0].Length
+    let sparseIndex sparseIndexConsumer (map:bitmap[]) (cellIndex:int64) =
+        let ncols = int64 (fst map.[0]).Length
         let rowIndex = cellIndex / ncols
         let colIndex = (cellIndex - (rowIndex*ncols))
-        if isSet colIndex map.[int rowIndex] then
-            let skippedCount = map |> Seq.take (int rowIndex) |> Seq.map ((countSkippedUpto ncols)>>int64) |> Seq.sum
+        if isSet (int colIndex) map.[int rowIndex] then
+            let skippedCount = map |> Seq.take (int rowIndex) |> Seq.map (snd>>int64) |> Seq.sum
             let skippedCount = skippedCount + int64 (countSkippedUpto colIndex map.[int rowIndex])
-            Some(cellIndex - skippedCount)
+            Some(sparseIndexConsumer (cellIndex - skippedCount))
         else
             None
 
@@ -96,18 +99,23 @@ module MemoryMappedSimpleRead =
         values
 
 module SparseReadWrite = 
+    let time n f =
+        let sw = Diagnostics.Stopwatch.StartNew()
+        let x = f()
+        printfn "%s took %d ms" n (sw.ElapsedMilliseconds)
+        x
     open BitMap
     let bitmapExtension = ".sbm" // sparse binary map
     let valuesExtension = ".sbv" // sparse binary values
     let writeBitMap fileName (map:bitmap []) =
         use writer = new BinaryWriter(File.Open(fileName, FileMode.OpenOrCreate))
         let nrows = map.Length
-        let ncols = map.[0].Length
+        let ncols = (fst map.[0]).Length
         writer.Write(nrows)
         writer.Write(ncols)
 
         let boolArray = Array.init ncols (fun i -> true)
-        for bitarray in map do
+        for (bitarray,_) in map do
             bitarray.CopyTo(boolArray, 0)
             boolArray |> Array.iter (fun b -> (writer.Write(b))) 
 
@@ -120,21 +128,29 @@ module SparseReadWrite =
         let valuesPath = (Path.ChangeExtension(filenameWithoutExtension, valuesExtension))
         writeValues valuesPath values
     
-    let readBitMap bitMapFileName = 
-        use reader = new BinaryReader(File.Open(bitMapFileName, FileMode.Open, FileAccess.Read, FileShare.Read))
-        let nrows = reader.ReadInt32()
-        let ncols = reader.ReadInt32()
-        let createRowBitMap i = BitMap.init ncols (fun i -> reader.ReadBoolean())
-        let map = Array.init nrows createRowBitMap
-        map
+    let cache = new Dictionary<string, bitmap []>()
 
-    let readValue (map:bitmap []) (reader:BinaryReader)  cellIndex =
-        match BitMap.sparseIndex map cellIndex with
-        | Some(index) -> SimpleReadWrite.readValue reader index
-        | None -> None
-        
+    let readBitMap bitMapFileName = 
+        if cache.ContainsKey(bitMapFileName) then 
+            cache.[bitMapFileName] 
+        else
+            printfn "readBitMap %s" bitMapFileName
+            use reader = new BinaryReader(File.Open(bitMapFileName, FileMode.Open, FileAccess.Read, FileShare.Read))
+            let nrows = reader.ReadInt32()
+            let ncols = reader.ReadInt32()
+            let createRowBitMap i = BitMap.init ncols (fun i -> reader.ReadBoolean())
+            let map = Array.init nrows createRowBitMap
+            cache.Add(bitMapFileName, map)
+            map
+
+    let readValue (map:bitmap []) (reader:BinaryReader) cellIndex =
+        let read sparseIndex = 
+            reader.BaseStream.Position <- sparseIndex*4L
+            reader.ReadInt32()
+        BitMap.sparseIndex read map cellIndex
+
     let readValues valuesFileName indices = 
-        let map = readBitMap (Path.ChangeExtension(valuesFileName, bitmapExtension))
+        let map = time "readBitMap" (fun () -> readBitMap (Path.ChangeExtension(valuesFileName, bitmapExtension)))
         use reader = new BinaryReader(File.Open(valuesFileName, FileMode.Open, FileAccess.Read, FileShare.Read))
         // Use list or array to force creation of values (otherwise reader gets disposed before the values are read)
         let values = 
@@ -152,7 +168,7 @@ module AsciiProvider =
 
     let parseRow nodata (values:string []) =
         let parsed = values |> Array.map (parseValue nodata)
-        let bitmap = parsed |> Array.map Option.isSome |> (fun bools -> (new System.Collections.BitArray(bools)))
+        let bitmap = parsed |> Array.map Option.isSome |> BitMap.ofArray
         (bitmap, parsed)
 
     let read fileName =
@@ -185,8 +201,8 @@ module AsciiProvider =
     
 module Reader =
     let simpleQuery indices fileName =
-        //SimpleReadWrite.readValues fileName indices
-        MemoryMappedSimpleRead.readValues fileName indices
+        SimpleReadWrite.readValues fileName indices
+        //MemoryMappedSimpleRead.readValues fileName indices
 
     let sparseQuery indices fileName =
         SparseReadWrite.readValues fileName indices
@@ -217,7 +233,6 @@ module Test =
         let results = SparseReadWrite.readValues p [1L;1654L;649L;963L]
         ignore
 
-
     let testPrepareLoad converter fileName = 
         let sbg = Path.Combine(@"D:\temp\", Path.GetFileNameWithoutExtension(fileName))
         converter fileName sbg
@@ -226,7 +241,7 @@ module Test =
         printfn "START %s" name
         let sbgPaths = paths |> Array.map (testPrepareLoad converter)
         
-        let r = new System.Random(1)
+        let r = new Random(1)
         let sw = new System.Diagnostics.Stopwatch()
         let len = outerlen
         let arr : int64 [] = Array.zeroCreate len
@@ -234,9 +249,8 @@ module Test =
         for i=0 to len-1 do
             sw.Restart()
             let indices = [1..innerlen] |> List.map (fun i -> (int64 (r.Next(0, 2160*1080)) ))
-            let indices = indices.OrderBy(fun x -> x)
+            //let indices = indices.OrderBy(fun x -> x)
             result <- Array.map (query indices) sbgPaths
-
             sw.Stop()
             arr.[i] <- sw.ElapsedMilliseconds
 
@@ -245,6 +259,19 @@ module Test =
         printfn "max %d ms" (Array.max arr)
         printfn "sum %d ms" (Array.sum arr)
         result
+
+    let testSparseIndex() = 
+        let r = new Random(1)
+        
+        let innerlen = 10000
+        let indices = [1..innerlen] |> List.map (fun i -> (int64 (r.Next(0, 2160*1080)) ))
+        let map = SparseReadWrite.readBitMap @"D:\temp\bathy_10m.sbm"
+        let sw = Diagnostics.Stopwatch.StartNew()
+        let result = indices |> Seq.map (BitMap.sparseIndex id map) |> Array.ofSeq
+        sw.Stop()
+        printfn "test sparse index %d ms" sw.ElapsedMilliseconds
+        result
+
     let testSimpleRandom = testRandomQuery AsciiProvider.convertToSimple Reader.simpleQuery
     let testSparseRandom = testRandomQuery AsciiProvider.convertToSparse Reader.sparseQuery 
     let testSmallMarspec() =
@@ -274,10 +301,8 @@ module Test =
         // 10s 100*1000
         // 9s 100*1000 with MemoryMappedFile caching
         
-
     let testGebco() =
         ignore // TODO
-
 
     let runall() =
         simpleReadWriteTest()
@@ -285,4 +310,4 @@ module Test =
         testSmallMarspec()
         testAllMarspec10m()
 
-Test.runall()
+//Test.runall()
