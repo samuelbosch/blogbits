@@ -183,6 +183,35 @@ module SparseReadWrite =
             |> List.map (readValue map reader)
         values
 
+module BatchOrderedRead = // asummes sorted and distinct input
+
+    let readValuesBatch (reader:BinaryReader) (indices:int64 []) = 
+        // set stream to correct location
+        let first,last = indices.[0], (indices.[indices.Length-1])
+        reader.BaseStream.Position <- first*4L
+        let bytes = reader.ReadBytes(int (((last + 1L) - first) * 4L))
+        let readValue index =
+            match (BitConverter.ToInt32(bytes, int (index-first))) with 
+            | Int32.MinValue -> None 
+            | v -> Some(v)
+
+        Array.map readValue indices
+        
+    let readValues fileName indices = 
+        use reader = new BinaryReader(File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
+        // Use list or array to force creation of values (otherwise reader gets disposed before the values are read)
+        let batchSize = 400L
+        let folder (first,lists) i = 
+            if ((i - first) < batchSize) && ((i - first) >= 0L) then 
+                match lists with
+                | x::xs -> (first, (i::x)::xs)
+                | [] -> (i, [[i]])
+            else
+                (i, ([i]::lists))
+            
+        let grouped = indices |> Seq.fold folder (-1L,[]) |> snd |> List.map (List.rev>>Array.ofList) |> List.rev
+        grouped |> List.map (readValuesBatch reader)
+
 module AsciiProvider = 
     let parseValue nodata (v:string) =
         if v <> nodata then
@@ -225,8 +254,8 @@ module AsciiProvider =
     
 module Reader =
     let simpleQuery indices fileName =
-        //SimpleReadWrite.readValues fileName indices
-        MemoryMappedSimpleRead.readValues fileName indices
+        SimpleReadWrite.readValues fileName indices
+        //MemoryMappedSimpleRead.readValues fileName indices
 
     let sparseQuery indices fileName =
         SparseReadWrite.readValues fileName indices
@@ -262,7 +291,7 @@ module Test =
         converter fileName sbg
 
     let testRandomQuery converter query name paths outerlen innerlen =
-        printfn "START %s" name
+        printfn "START %s %d %d" name outerlen innerlen
         let sbgPaths = paths |> Array.map (testPrepareLoad converter)
         
         let r = new Random(1)
@@ -273,13 +302,13 @@ module Test =
         for i=0 to len-1 do
             sw.Restart()
             let indices = [1..innerlen] |> List.map (fun i -> (int64 (r.Next(0, 2160*1080)) ))
-            let indices = indices.OrderBy(fun x -> x)
+            //sorted and distinct input is assumed by some readers
+            let indices = List.sort indices |> Seq.distinct |> List.ofSeq
             result <- Array.map (query indices) sbgPaths
             sw.Stop()
             arr.[i] <- sw.ElapsedMilliseconds
 
         printfn "avg %f ms" (Array.averageBy float arr)
-        printfn "min %d ms" (Array.min arr)
         printfn "max %d ms" (Array.max arr)
         printfn "sum %d ms" (Array.sum arr)
         result
@@ -296,15 +325,22 @@ module Test =
         printfn "test sparse index %d ms" sw.ElapsedMilliseconds
         result
 
-    let testSimpleRandom = testRandomQuery AsciiProvider.convertToSimple Reader.simpleQuery
+    let testSimpleRandom = testRandomQuery AsciiProvider.convertToSimple (fun indices fileName -> SimpleReadWrite.readValues fileName indices)
+    let testMemoryRandom = testRandomQuery AsciiProvider.convertToSimple (fun indices fileName -> MemoryMappedSimpleRead.readValues fileName indices)
     let testSparseRandom = testRandomQuery AsciiProvider.convertToSparse Reader.sparseQuery 
+    let testBatchRandom = testRandomQuery AsciiProvider.convertToSimple (fun indices fileName -> BatchOrderedRead.readValues fileName indices)
+
     let testSmallMarspec() =
         let outerlen = 10
         let innerlen = 10000
+        let result3 = testBatchRandom "test batch SmallMarspec" [|@"D:\a\data\marspec\MARSPEC_10m\ascii\bathy_10m.asc"|] outerlen innerlen
         let result1 = testSimpleRandom "test simple SmallMarspec" [|@"D:\a\data\marspec\MARSPEC_10m\ascii\bathy_10m.asc"|] outerlen innerlen
         let result2 = testSparseRandom "test sparse SmallMarspec" [|@"D:\a\data\marspec\MARSPEC_10m\ascii\bathy_10m.asc"|] outerlen innerlen
-        printfn "simple result: %A" result1
-        printfn "sparse result: %A" result2
+                
+//        printfn "simple result: %A" result1
+//        printfn "sparse result: %A" result2
+//        printfn "batch result: %A" result2
+        ()
 
     let testAllBioOracle() =
         ignore // TODO
@@ -314,22 +350,29 @@ module Test =
 
         let root = @"D:\a\data\marspec\MARSPEC_10m\ascii\"
         let paths = Directory.GetFiles(root, "*.asc")
-        testSimpleRandom "test simple AllMarspec10m" paths 100 1000 |> ignore
-        //testSparseRandom "test sparse AllMarspec10m" paths 10000 10 |> ignore
-        
+        let prm = [(10000,10);(1000,100);(100,1000)]
+        for (outer, inner) in prm do
+            testSimpleRandom "Simple AllMarspec10m" paths outer inner |> ignore
+            testMemoryRandom "Memory mapped AllMarspec10m" paths outer inner |> ignore
+            testSparseRandom "Sparse AllMarspec10m" paths outer inner |> ignore
+            testBatchRandom "Batch AllMarspec10m" paths outer inner |> ignore
         // Simple
-        // 39s 10000 * 10
-        // 22s 1000 * 100
-        // 17s 100 * 1000
-        // 16s 100 * 1000 with BinaryReader caching
+        // 32s 10000 * 10
+        // 20s 1000 * 100
+        // 14s 100 * 1000
+        // 13s 100 * 1000 with BinaryReader caching
         // MemoryMappedRead
-        // 86s 10000 * 10
-        // 28s 1000 * 100
-        // 10s 100*1000
+        // 109s 10000 * 10
+        // 23s 1000 * 100
+        // 6s 100*1000
         // 9s 100*1000 with MemoryMappedFile caching
         // Sparse (all with bitmap caching up front)
         // 32s 10000 * 10
-        // 18s 1000 * 100
+        // 17s 1000 * 100
+        // 14s 100 * 1000
+        // Batch
+        // 34s 10000 * 10
+        // 20s 1000 * 100
         // 15s 100 * 1000
 
     let testGebco() =
