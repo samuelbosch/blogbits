@@ -304,6 +304,7 @@ module Test =
             let indices = [1..innerlen] |> List.map (fun i -> (int64 (r.Next(0, 2160*1080)) ))
             //sorted and distinct input is assumed by some readers
             let indices = List.sort indices |> Seq.distinct |> List.ofSeq
+            use t = File.CreateText(@"D:\test_param.txt")
             result <- Array.map (query indices) sbgPaths
             sw.Stop()
             arr.[i] <- sw.ElapsedMilliseconds
@@ -344,7 +345,20 @@ module Test =
 
     let testAllBioOracle() =
         ignore // TODO
+    let writeParams innerlen (outerlen:int) = 
+        let r = new Random(1)
 
+        use t = File.AppendText(@"D:\test_param.txt")
+        t.WriteLine(outerlen)
+
+        for i=1 to outerlen do
+            
+            let indices = [1..innerlen] |> List.map (fun i -> (int64 (r.Next(0, 2160*1080)) ))
+            //sorted and distinct input is assumed by some readers
+            let indices = List.sort indices |> Seq.distinct |> List.ofSeq
+            t.WriteLine(indices.Length)
+            t.WriteLine(String.Join(";", (List.map string indices)))
+            
     let testAllMarspec10m() =
         // fetch 1000 times, 100 random values from 40 marspec layers
 
