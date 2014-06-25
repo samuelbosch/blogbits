@@ -6,6 +6,7 @@ read.values <- function(filename, indices) {
   }
   r <- sapply(indices,read.value)
   close(conn)
+  r[r==-2147483648] <- NA
   r
 }
 
