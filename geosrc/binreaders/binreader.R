@@ -17,7 +17,7 @@ get.indices <- function(n) {
 smallmarspec <- function(outer, inner) {
   result <- NULL
   for (i in 1:outer) {
-    r <- read.values("D:\\temp\\bathy_10m.sbg", get.indices(n))
+    r <- read.values("D:\\temp\\bathy_10m.sbg", get.indices(inner))
   }
 }
 
@@ -32,6 +32,6 @@ allmarspec <- function(outer, inner) {
   r
 }
 
-system.time(allmarspec(10,10)) #0.15ms
+system.time(allmarspec(10,10)) #0.15s
 system.time(allmarspec(100,100)) #11s
 #system.time(allmarspec(1000,100)) #115s
