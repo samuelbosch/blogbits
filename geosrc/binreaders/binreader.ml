@@ -7,7 +7,10 @@ let input_le_int32 inchannel = (* http://stackoverflow.com/a/6031286/477367 *)
       let byte = input_byte inchannel in
         res := Int32.logor !res (Int32.shift_left (Int32.of_int byte) (8*i))
     done;
-    !res
+
+    match !res with
+      | -2147483648l -> None
+      | v -> Some(v)
 
 let readvalue inchannel index =
   seek_in inchannel (index*4);
@@ -45,8 +48,10 @@ let time f x =
 
 allmarspec 1 10;;
 time (allmarspec 10) 10;; (* <0.07s *)
-time (allmarspec 100) 100;; (* <0.5s  *)
-time (allmarspec 1000) 100;; (* <5s *)
-time (allmarspec 10) 10000;; (* <1.7s *)
-time (allmarspec 1) 100000;; (* <1.7s *)
+time (allmarspec 100) 100;; (* <0.6s  *)
+time (allmarspec 1000) 100;; (* <6s *)
+time (allmarspec 10) 10000;; (* <2.3s *)
+time (allmarspec 1) 100000;; (* <2.1s *)
 
+let long_running () =
+  time (allmarspec 10000) 10;; (* <48s *)
