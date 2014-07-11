@@ -3,7 +3,7 @@ open System.IO
 
 let readValue (reader:BinaryReader) cellIndex = 
     // set stream to correct location
-    reader.BaseStream.Position <- int64 (cellIndex*4)
+    reader.BaseStream.Seek(int64 (cellIndex*4), SeekOrigin.Begin) |> ignore
     match reader.ReadInt32() with
     | Int32.MinValue -> None
     | v -> Some(v)
@@ -30,11 +30,11 @@ let time f x =
     let fx = f x
     printf "Execution time: %fs %i %i\n" (float sw.ElapsedMilliseconds / 1000.0) (Array.length fx) (Array.length (fx.[0]))
 
-allmarspec 1 10;;
-time (allmarspec 10) 10;; (* <0.07s *)
-time (allmarspec 100) 100;; (* <1.1s  *)
-time (allmarspec 1000) 100;; (* <10.5s *)
-time (allmarspec 10) 10000;; (* <9s *)
-time (allmarspec 1) 100000;; (* <9s *)
+(allmarspec 1 10);;
+time (allmarspec 10) 10;; (* <0.05s *)
+time (allmarspec 100) 100;; (* <0.8s  *)
+time (allmarspec 1000) 100;; (* <7.5s *)
+time (allmarspec 10) 10000;; (* <6s *)
+time (allmarspec 1) 100000;; (* <6s *)
 let long_running () =
-    time (allmarspec 10000) 10;; (* <23s *)
+    time (allmarspec 10000) 10;; (* <20s *)
