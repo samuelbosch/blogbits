@@ -35,3 +35,4 @@ allmarspec <- function(outer, inner) {
 system.time(allmarspec(10,10)) #0.15s
 system.time(allmarspec(100,100)) #11s
 #system.time(allmarspec(1000,100)) #115s
+#system.time(allmarspec(10,10000)) #110s
