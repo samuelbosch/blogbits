@@ -399,3 +399,78 @@ module Test =
         testAllMarspec10m()
 
 //Test.runall()
+
+
+module Seq =
+    let all predicate source =
+        not (Seq.exists (predicate>>not) source)
+    let iterseq f (sources: seq<seq<_>>) =
+        let enumerators = sources |> Array.ofSeq |> Array.map (fun s -> (s.GetEnumerator()))
+        while (enumerators |> all (fun e -> (e.MoveNext()))) do
+            enumerators |> Array.iter (fun enumerator -> f (enumerator.Current))
+
+
+module MergedReadWrite = 
+    let merge dir =
+        let files = System.IO.Directory.EnumerateFiles(dir, "*.sbg") |> List.ofSeq // force creation
+        let outfile = System.IO.Path.GetDirectoryName(Seq.head files) + @"\merged.mbg"
+        use writer = new BinaryWriter(File.Open(outfile, FileMode.OpenOrCreate)) 
+        let readers = files |> Seq.map (fun f -> (new BinaryReader(File.Open(f,FileMode.Open, FileAccess.Read, FileShare.Read))))
+        
+        let read (reader:BinaryReader) =
+            seq {
+                let b = ref (reader.ReadBytes(4))
+                while (!b).Length > 0 do
+                    yield !b
+                    b := reader.ReadBytes(4)
+            }
+        
+        let values = readers |> Seq.map read
+        values |> Seq.iterseq (fun b -> (writer.Write(b))) 
+        //(read (Seq.head readers)) |> Seq.iter (fun b -> (writer.Write(b)))
+            
+    let readColumns (reader:BinaryReader) columnCount cellIndex = 
+        // set stream to correct location
+        reader.BaseStream.Position <- cellIndex*4L*(int64 columnCount)
+        let read i = match reader.ReadInt32() with
+                     | Int32.MinValue -> None
+                     | v -> Some(v)
+        let values:int option[] = Array.init columnCount read
+        values
+//        let bytes = reader.ReadBytes(4*columnCount)
+//        let values = Array.init columnCount (fun i -> (int bytes.[0] ||| (int bytes.[1] <<< 8) ||| (int bytes.[2] <<< 16) ||| (int bytes.[3] <<< 24)))
+//        values |> Array.map (fun i -> if (i = Int32.MinValue) then None else Some(i))
+
+
+    let readValues fileName ncol indices = 
+        use reader = new BinaryReader(File.Open(fileName, FileMode.Open, FileAccess.Read, FileShare.Read))
+        // Use list or array to force creation of values (otherwise reader gets disposed before the values are read)
+        let values = indices |> Array.map (readColumns reader ncol)
+        values
+
+    let testRandomMergeQuery path ncol outerlen innerlen =
+        printfn "START random merge query %d %d" outerlen innerlen
+        
+        let r = new Random(1)
+        let sw = new System.Diagnostics.Stopwatch()
+        let len = outerlen
+        let arr : int64 [] = Array.zeroCreate len
+        let mutable result = null
+        for i=0 to len-1 do
+            sw.Restart()
+            let indices = [1..innerlen] |> List.map (fun i -> (int64 (r.Next(0, 2160*1080)) ))
+            //sorted and distinct input is assumed by some readers
+            let indices = List.sort indices |> Seq.distinct |> Array.ofSeq
+            result <- readValues path ncol indices
+            sw.Stop()
+            arr.[i] <- sw.ElapsedMilliseconds
+
+        printfn "avg %f ms" (Array.averageBy float arr)
+        printfn "max %d ms" (Array.max arr)
+        printfn "sum %d ms" (Array.sum arr)
+        result
+
+    let testMultiParams() =
+        let prm = [(10000,10);(1000,100);(100,1000);(10,100000);(1,1000000)]
+        for (outer, inner) in prm do
+            printfn "length: %d" (testRandomMergeQuery @"D:\temp\sbg_10m\merged.mbg" 39 outer inner |> Array.length)
