@@ -32,6 +32,8 @@ int main(int argc, char *argv[])
 	allmergedmarspec(1000,100); // 150 ms
 	allmergedmarspec(10,10000); // 65 ms
 	allmergedmarspec(1,100000); // 65 ms
+    allmergedmarspec(1,1000000); // 700 ms (when file is cached)
+    allmergedmarspec(1,2000000); // 3100 ms
 	return 0;
 }
 
@@ -40,7 +42,8 @@ int *getindices(int n)
     int *indices = malloc(sizeof(int) * n);
     int i;
     for (i=0; i<n; i++) {
-    	indices[i] = 10000+(i*3);
+    	//indices[i] = 10000+(i*3);
+        indices[i] = 1+(i*2);
 	}
     return indices;
 }
