@@ -55,7 +55,10 @@ int *readvalues(int count, int indices[], char *filename) {
 		int ok = fseek(fp, (long)indices[i]*4, SEEK_SET);
 		int c = fread(buffer,sizeof(int), readcount, fp);
 		if (ok == 0 && c == readcount) {
-			results[i] = buffer[0];	
+            int value = buffer[0];
+            if (value == -2147483648l)
+                value = 99999; // simulate null handling
+			results[i] = value;	
 		}
 	}
 	fclose(fp);
@@ -108,13 +111,17 @@ void allmarspec(int outer, int inner) {
 int **readmergedvalues(int count, int indices[], int ncol, char *filename) {
 	FILE *fp = fopen(filename,"r");
 	int **results = malloc(sizeof(int*) * count);
-	int i;
+	int i,j;
 	for (i=0; i<count; i++) {
 		int ok = fseek(fp, (long)indices[i]*(long)4*(long)ncol, SEEK_SET);
 		if (ok == 0){
 			int *buffer = malloc(sizeof(int)*ncol);
 			int c = fread(buffer,sizeof(int), ncol, fp);
 			if (c == ncol) {
+                for (j=0; j<ncol; j++){
+                    if (buffer[j] == -2147483648l)
+                        buffer[j] = 99999; //simulate null handling
+                }
 				results[i] = buffer;
 			}
 		}
@@ -152,6 +159,6 @@ void allmergedmarspec(int outer, int inner) {
 	gettimeofday(&end, NULL);
 	
 	printf(" took %ld ms to get %d, %d from col 1 and values from %d other columns\n", 
-	    ((end.tv_sec * 1000 + (end.tv_usec / 1000)) - (start.tv_sec * 1000 + (start.tv_usec / 1000))),values[0][0], values[0][1], ncol-1);
+	    ((end.tv_sec * 1000 + (end.tv_usec / 1000)) - (start.tv_sec * 1000 + (start.tv_usec / 1000))),values[0][0], values[2][0], ncol-1);
     free(values);
 }
