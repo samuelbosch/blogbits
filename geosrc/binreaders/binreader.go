@@ -3,7 +3,7 @@ package main
 import (
     "fmt"
     "os"
-    
+    "syscall"
     "io/ioutil"
     "path"
     "time"
@@ -21,9 +21,11 @@ func readValues(indices []int, filename string) []int32 {
     results := make([]int32, len(indices))
     b := make([]byte, 4)
     f,_ := os.Open(filename)
+    fd := syscall.Handle(f.Fd())
+    //value := int32(0)
     for i, cellIndex := range indices {
-        f.Seek(int64(cellIndex*4), os.SEEK_SET)
-        f.Read(b)
+        syscall.Seek(fd, int64(cellIndex*4), os.SEEK_SET) // f.Seek(int64(cellIndex*4), os.SEEK_SET)
+        syscall.Read(fd, b) //f.Read(b)
         value := bytes2int(b) // around 10-20% faster then binary.Read
         //package "encoding/binary"
         //binary.Read(f,binary.LittleEndian, &value)
