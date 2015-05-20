@@ -28,7 +28,7 @@ module AzimuthalEquidistantProjection =
         let c = acos ((sint1) * (sint) + (cost1) * costcosll0)
         let k = c / (sin c)
         let x = k * (cos t) * (sin (l-l0))
-        let y = k * (cost1) * (sint) - (sint1) * costcosll0
+        let y = k * (cost1 * sint - sint1 * costcosll0)
         (x, y)
 
     let buildProjection centerLon centerLat = 
@@ -61,6 +61,6 @@ module AzimuthalEquidistantProjectionWithMeasures =
         let k = c / (sin c)
         let x:float<x> = k * (cos t) * (sin (l-l0)) 
                          |> LanguagePrimitives.FloatWithMeasure
-        let y:float<y> = k * (cos t1) * (sin t) - (sin t1) * (cos t) * (cos (l-l0)) 
+        let y:float<y> = k * ((cos t1) * (sin t) - (sin t1) * (cos t) * (cos (l-l0)))
                          |> LanguagePrimitives.FloatWithMeasure
         (x, y)
