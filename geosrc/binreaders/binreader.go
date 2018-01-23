@@ -64,9 +64,9 @@ func allmarspec (outer int, inner int) []int32 {
 func main() {
     //fmt.Println(readValues([]int{0,1,2,13}, "D:\\temp\\sbg_10m\\bathy_10m.sbg"))
     
-    fmt.Println(allmarspec(100,100)) // 1s
+    //fmt.Println(allmarspec(100,100)) // 1s
     //fmt.Println(allmarspec(1000,100)) // 10s
-    //fmt.Println(allmarspec(10,10000)) // 8s
+    fmt.Println(allmarspec(10,10000)) // 8s
     //fmt.Println(allmarspec(1,100000)) // 8s
     //fmt.Println(allmarspec(10000,10)) // 25s
 }
