@@ -66,5 +66,5 @@ if __name__ == '__main__':
 
     import cProfile
 
-    cProfile.runctx('gc_distance_points(centr, np.asarray(xy))', globals(), locals())
-    cProfile.runctx('dists = [gc_dist(centr, b) for b in xy]', globals(), locals())
+    cProfile.runctx('gc_distance_points(centr, pts)', globals(), locals())
+    cProfile.runctx('dists = [gc_dist(centr, b) for b in pts]', globals(), locals())
