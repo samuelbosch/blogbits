@@ -26,7 +26,8 @@ def decrease_min(fruits):
     for i, v in enumerate(fruits):
         if v < mv and v > 0:
             mi,mv = i,v
-    fruits[mi] = mv-1
+    if mv < 11:
+        fruits[mi] = mv-1
 
 def decrease_random(fruits):
     mi = random.randint(0,3)
@@ -56,9 +57,9 @@ def simulate_orchard_random(count):
 
 print('Winning rates of 10 runs of the best strategy with 50 games: \n%s' %
       ([str(simulate_orchard_best(50)) + '%' for _ in range(10)]))
-    
-print('Winning rates of 10 runs of the best strategy with 1000 games: %s' %
-      ([str(simulate_orchard_best(1000)) + '%' for _ in range(10)])) 
+
+print('Winning rates of 10 runs of the best strategy with 1000 games: \n%s' %
+      ([str(simulate_orchard_best(1000)) + '%' for _ in range(10)]))
 
 print('Winning rates of 10 runs of the worst strategy with 50 games: \n%s' %
       ([str(simulate_orchard_worst(50)) + '%' for _ in range(10)]))
